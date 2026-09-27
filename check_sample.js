@@ -43,13 +43,15 @@ emit("与全量对照差异 =", fingerprint(closed.state) === fingerprint(fullCl
 
 
 // ---- 异常路径探针：真调用实现，看它报出什么码（不是从样例里抄）----
+const probeCodes = { duplicate: "没有报错", capacity: "没有报错", event: "没有报错" };
 try {
   step(Object.assign({}, { budget: 1, k: 2,
     state: { pool: [], seen: 0, ids: ["s1"], ledger: [], applied: [] },
     events: [{ id: 1, kind: "sample", sid: "s1", value: 5 }] }));
   emit("重复样本报码", "没有报错");
 } catch (error) {
-  emit("重复样本报码", error && error.code ? error.code : String(error.message));
+  probeCodes.duplicate = error && error.code ? error.code : String(error.message);
+  emit("重复样本报码", probeCodes.duplicate);
 }
 try {
   step(Object.assign({}, { budget: 1, k: 0,
@@ -57,7 +59,8 @@ try {
     events: [{ id: 1, kind: "sample", sid: "s1", value: 5 }] }));
   emit("容量不合法报码", "没有报错");
 } catch (error) {
-  emit("容量不合法报码", error && error.code ? error.code : String(error.message));
+  probeCodes.capacity = error && error.code ? error.code : String(error.message);
+  emit("容量不合法报码", probeCodes.capacity);
 }
 try {
   step(Object.assign({}, { budget: 1, k: 2,
@@ -65,8 +68,33 @@ try {
     events: [{ id: 1, kind: "peek", sid: "s1" }] }));
   emit("事件不合法报码", "没有报错");
 } catch (error) {
-  emit("事件不合法报码", error && error.code ? error.code : String(error.message));
+  probeCodes.event = error && error.code ? error.code : String(error.message);
+  emit("事件不合法报码", probeCodes.event);
 }
+
+
+// ---- 七条机检断言：真调实现，任何一条不过都计入失败并以非零退出 ----
+const __assertions = [
+  ["两档处理样本数不同", first.served !== wide.served],
+  ["收尾前账大于零而收尾后归零", first.ledger_before > 0 && closed.state.ledger.length === 0],
+  ["拆两轮中间态不同而收尾态一致",
+    fingerprint(r2.state) !== fingerprint(first.state)
+      && fingerprint(closedTwo.state) === fingerprint(closed.state)],
+  ["重放不再处理", replay.served === 0],
+  ["工作计数不超事件条数", first.judged >= 0 && first.judged <= events.length],
+  ["与全量对照为零",
+    (fingerprint(closed.state) === fingerprint(fullClosed.state) ? 0 : 1) === 0],
+  ["异常探针真调",
+    probeCodes.duplicate === "E_DUPLICATE_SAMPLE"
+      && probeCodes.capacity === "E_BAD_CAPACITY"
+      && probeCodes.event === "E_BAD_EVENT"]
+];
+let __assertBad = 0;
+for (const [name, ok] of __assertions) {
+  if (ok) { console.log("断言通过 " + name); }
+  else { __assertBad += 1; console.log("断言失败 " + name); }
+}
+console.log("机检断言 " + (__assertions.length - __assertBad) + "/" + __assertions.length + " 通过");
 
 
 // ---- 期望值（参考模型算出，与题面给的验收数值一致）----
@@ -121,4 +149,4 @@ for (const [label, want] of Object.entries(EXPECTED)) {
   else { __bad += 1; console.log("不一致 " + label + " 期望 " + JSON.stringify(want) + " 实际 " + JSON.stringify(got)); }
 }
 console.log("验收项 " + (Object.keys(EXPECTED).length - __bad) + "/" + Object.keys(EXPECTED).length + " 通过");
-process.exit(__bad === 0 ? 0 : 1);
+process.exit(__bad === 0 && __assertBad === 0 ? 0 : 1);
